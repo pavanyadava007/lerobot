@@ -16,12 +16,17 @@ from __future__ import annotations
 
 import abc
 import importlib
+import importlib.util
+import logging
+import os
 from dataclasses import dataclass, field, fields
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import draccus
 import gymnasium as gym
+import yaml
 from gymnasium.envs.registration import registry as gym_registry
 
 from lerobot.configs import FeatureType, PolicyFeature
@@ -44,6 +49,8 @@ from lerobot.utils.constants import (
     OBS_IMAGES,
     OBS_STATE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _make_vec_env_cls(use_async: bool, n_envs: int):
@@ -318,6 +325,44 @@ class HILSerlRobotEnvConfig(EnvConfig):
         return {}
 
 
+def _ensure_libero_config() -> None:
+    """Write LIBERO's default ``config.yaml`` if it does not exist yet.
+
+    On first import, ``libero.libero`` calls ``input()`` to ask for a dataset folder when
+    ``$LIBERO_CONFIG_PATH/config.yaml`` (default ``~/.libero/config.yaml``) is missing. That
+    blocks or crashes non-interactive runs such as ``nohup``, SLURM jobs and CI with
+    ``EOFError``. This writes the same defaults LIBERO writes when the user answers "N", so
+    LeRobot can import LIBERO without a prompt. An existing config is never modified.
+    """
+    config_dir = Path(os.environ.get("LIBERO_CONFIG_PATH", os.path.expanduser("~/.libero")))
+    config_file = config_dir / "config.yaml"
+    if config_file.exists():
+        return
+
+    try:
+        # find_spec locates libero/libero without executing its __init__ (which holds the prompt).
+        spec = importlib.util.find_spec("libero.libero")
+    except ModuleNotFoundError:
+        spec = None
+    if spec is None or not spec.submodule_search_locations:
+        return  # LIBERO is not installed; the import in create_envs reports that.
+
+    root = list(spec.submodule_search_locations)[0]
+    defaults = {
+        "benchmark_root": root,
+        "bddl_files": os.path.join(root, "./bddl_files"),
+        "init_states": os.path.join(root, "./init_files"),
+        "datasets": os.path.join(root, "../datasets"),
+        "assets": os.path.join(root, "./assets"),
+    }
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_file, "w") as f:
+        yaml.safe_dump(defaults, f)
+    logger.info(
+        f"Wrote default LIBERO config to {config_file} (set LIBERO_CONFIG_PATH to change its location)."
+    )
+
+
 @EnvConfig.register_subclass("libero")
 @dataclass
 class LiberoEnv(EnvConfig):
@@ -427,6 +472,7 @@ class LiberoEnv(EnvConfig):
         return kwargs
 
     def create_envs(self, n_envs: int, use_async_envs: bool = False):
+        _ensure_libero_config()
         from .libero import create_libero_envs
 
         if self.task is None:

@@ -37,6 +37,14 @@ export MUJOCO_GL=egl  # for headless servers (HPC, cloud)
 
 </Tip>
 
+<Tip>
+  On first import, LIBERO asks for a dataset folder if `~/.libero/config.yaml`
+  does not exist, which fails with `EOFError` in non-interactive jobs (SLURM,
+  `nohup`, CI). LeRobot writes LIBERO's default config before creating the
+  environments, so no prompt appears. An existing config is never changed. Set
+  `LIBERO_CONFIG_PATH` to keep the config somewhere other than `~/.libero`.
+</Tip>
+
 ## Evaluation
 
 ### Default evaluation (recommended)
